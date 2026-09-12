@@ -121,5 +121,5 @@ npm run logo        # 重新生成 logo.png（从母版降采样）
 ## 9. 交付物位置
 - 可交付目录：`release/flash-stash-0.5.5/`（plugin.json + preload.js + logo.png + dist/）
 - 参考 zip：`flash-stash-0.5.5.zip`（外部 zip 不能直接装，仅传输用；正式安装走开发者工具打包 .upxs）
-- 文档：README.md（用法）、CHANGELOG.md（历史）、发布文案.md（市场发布用的插件介绍 / 版本说明 / 发布前检查清单）、UTools-插件开发要求速查.md（官方规范要点）
+- 文档：README.md（用法）、CHANGELOG.md（历史）、UTools-插件开发要求速查.md（官方规范要点）
 - Agent 文档（不进 release 目录，仅仓库内供 agent 读取）：AGENTS.md（**唯一内容出处**）、CLAUDE.md（CLAUDE薄引用）、.agents/agent.md（DSH 薄引用）
