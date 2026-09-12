@@ -1,0 +1,47 @@
+{
+  "name": "flash-stash",
+  "productName": "闪藏",
+  "version": "0.5.5",
+  "description": "uTools 插件：瞬间收纳 · 随取随用",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "logo": "python3 scripts/make-logo.py",
+    "test:unit": "node --test tests/store.test.ts tests/search.test.ts tests/markdown.test.ts",
+    "test:editor": "node --test tests/editor.test.ts",
+    "test:ui": "npm run build && node --test tests/ui-smoke.test.ts",
+    "test": "npm run build && node --test tests/store.test.ts tests/search.test.ts tests/markdown.test.ts tests/editor.test.ts tests/ui-smoke.test.ts",
+    "pack": "npm run build && node scripts/pack.mjs",
+    "test:browser": "node --test tests/ui-browser.test.ts"
+  },
+  "dependencies": {
+    "@tiptap/core": "^3.31.3",
+    "@tiptap/extension-code": "^3.31.3",
+    "@tiptap/extension-code-block-lowlight": "^3.31.3",
+    "@tiptap/extension-link": "^3.31.3",
+    "@tiptap/extension-table": "^3.31.3",
+    "@tiptap/extension-table-cell": "^3.31.3",
+    "@tiptap/extension-table-header": "^3.31.3",
+    "@tiptap/extension-table-row": "^3.31.3",
+    "@tiptap/extension-underline": "^3.31.3",
+    "@tiptap/pm": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
+    "dompurify": "^3.4.14",
+    "lowlight": "^3.3.0",
+    "marked": "^18.0.11",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^26.4.1",
+    "@types/turndown": "^5.0.6",
+    "jsdom": "^30.0.1",
+    "playwright": "^1.62.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  }
+}

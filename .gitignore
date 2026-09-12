@@ -1,0 +1,21 @@
+# ---- 依赖与包管理缓存 ----
+node_modules/
+.pnpm-store/
+.npm-cache/
+.xdg-cache/
+
+# ---- 构建产物（npm run build / npm run pack 生成） ----
+dist/
+release/
+*.zip
+*.upxs
+
+# ---- 测试产物 ----
+artifacts/
+.pw-browsers/
+.pack-tmp/
+
+# ---- 日志 / 系统文件 ----
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,65 @@
+{
+  "pluginName": "闪藏",
+  "description": "瞬间收纳 · 随取随用 —— 快速收藏文本、图片与 Markdown 片段，标签化管理，一键复制",
+  "author": "doubleXiao",
+  "version": "0.5.5",
+  "logo": "logo.png",
+  "main": "dist/index.html",
+  "preload": "preload.js",
+  "pluginSetting": {
+    "single": true,
+    "height": 560
+  },
+  "features": [
+    {
+      "code": "flashstash.main",
+      "explain": "打开闪藏主面板，搜索与查看收藏",
+      "cmds": [
+        "闪藏",
+        "flash-stash"
+      ]
+    },
+    {
+      "code": "flashstash.save.text",
+      "explain": "将选中的文本保存到闪藏",
+      "cmds": [
+        {
+          "type": "over",
+          "label": "闪藏：收藏文本",
+          "exclude": "/\\n/",
+          "minLength": 1,
+          "maxLength": 20000
+        }
+      ]
+    },
+    {
+      "code": "flashstash.save.md",
+      "explain": "将选中的多行/Markdown 片段保存到闪藏",
+      "cmds": [
+        {
+          "type": "over",
+          "label": "闪藏：收藏 Markdown",
+          "minLength": 1,
+          "maxLength": 20000
+        }
+      ]
+    },
+    {
+      "code": "flashstash.save.img",
+      "explain": "将选中的图片保存到闪藏",
+      "cmds": [
+        {
+          "type": "img",
+          "label": "闪藏：收藏图片"
+        }
+      ]
+    },
+    {
+      "code": "flashstash.save.clipboard",
+      "explain": "保存剪贴板中的内容到闪藏",
+      "cmds": [
+        "闪藏：保存剪贴板"
+      ]
+    }
+  ]
+}
