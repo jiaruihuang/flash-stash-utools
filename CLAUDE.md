@@ -1,14 +1,10 @@
-# 闪藏 (flash-stash) — Claude Code Agent 入口
+# Agent 入口（Claude Code 兼容层）
 
-> 本文是 **Claude Code agent** 的兼容入口（**薄引用，不承载内容**）。
-> 项目完整指南只存在于根目录 **@AGENTS.md**（agents.md 开放标准，单一事实来源）。
-> 其他工具入口：OpenCode 直接读根 AGENTS.md；DSH 见 `.agents/agent.md`（同为薄引用）。
+> 本文是各工具约定的**薄引导入口，不承载内容**；遵循 agents.md 开放标准的工具（OpenCode 等）直接读取根目录 **@AGENTS.md**。
+> 模板核心：`AGENTS.md`（契约与知识地图骨架）+ `WORKMETHOD.md`（跨领域方法论）；项目实例情报：`HANDOFF.md`（背景/进展/架构/硬规则/档案索引）。
 
 ## 开工顺序
-1. 先读 **@AGENTS.md** —— 项目速览、必读引用表（含 @HANDOFF.md）、命令、关键陷阱、工作流
-2. 按其中「必读引用」按需打开 @HANDOFF.md（交接权威）、@CHANGELOG.md、src 相关文件等
-
-项目一句话：uTools 插件「闪藏」——快速收藏文本 / Markdown / 图片，标签 + 备注 + 全文搜索 + 一键复制。
+按 **@AGENTS.md** §1 执行：读 `@HANDOFF.md`（项目）→ `@WORKMETHOD.md`（做事方法，通读一次）→ `docs/traps/` 按需 → `docs/TODO.md`
 
 ## 规则
-- 本文件只做引导，**不要复制 AGENTS.md 的内容**；内容变更只改 @AGENTS.md。
+- 本文件只做引导，**不承载任何内容**：契约与方法论只改 `AGENTS.md` / `WORKMETHOD.md`，项目情报只改 `HANDOFF.md` 与 `docs/`；本文件无项目内容，随模板复制、不随项目定制。
