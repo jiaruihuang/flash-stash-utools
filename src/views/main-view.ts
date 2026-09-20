@@ -1,13 +1,19 @@
-// 主面板：搜索 / 浏览 / 复制 / 编辑 / 删除 / 标签管理
+// 主面板：搜索 / 浏览 / 复制 / 编辑 / 删除 / 标签管理 / 排序 / 批量选择
 import type { Snippet } from "../types.ts";
 import type { Store } from "../db.ts";
 import type { SearchHit } from "../search.ts";
 import { searchSnippets, filterSnippets } from "../search.ts";
 import { renderMarkdown } from "../render.ts";
-import { snippetExcerpt, formatTime, highlightText, escapeHtml } from "../utils.ts";
+import { snippetExcerpt, formatTime, highlightText, escapeHtml, snippetTitle } from "../utils.ts";
 import { h, toast, confirmDialog, openModal } from "../ui.ts";
 import { attachCodeCopyLayer } from "../code-block-ui.ts";
+import { matchTextOrPinyin } from "../pinyin.ts";
 import { pushEsc } from "../escape.ts";
+import { KIND_ICON, KIND_LABEL, thumbnailEl } from "../item-view.ts";
+import {
+  SORT_OPTIONS, GROUP_OPTIONS, sortLabel, sortSnippets, groupSnippets, normalizeSortKey, normalizeSortDir
+} from "../sort.ts";
+import type { SortMode } from "../sort.ts";
 
 export interface MainCallbacks {
   onEdit: (s: Snippet) => void;
@@ -22,13 +28,19 @@ interface MainState {
 
 const MAX_TAG_CHIPS = 6;
 
-const KIND_ICON: Record<Snippet["kind"], string> = { text: "文", markdown: "M↓", image: "图" };
-const KIND_LABEL: Record<Snippet["kind"], string> = { text: "文本", markdown: "Markdown", image: "图片" };
 export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, initQuery = ""): void {
   const state: MainState = { query: initQuery, kind: "", tags: [] };
   // 搜索结果与键盘导航状态（修订3B）
   let hits: SearchHit[] = [];
   let activeIdx = 0;
+  // 0.6.0：排序偏好（持久化在 setting/ux，选定后下次打开插件仍生效）
+  const ux0 = store.getUxSettings();
+  let sortMode: SortMode = normalizeSortKey(ux0.sortMode);
+  let sortDir = normalizeSortDir(ux0.sortDir);
+  let sortGroup: "none" | "day" = ux0.sortGroup === "day" ? "day" : "none";
+  // 0.6.0：批量删除模式
+  let batchMode = false;
+  const picked = new Set<string>();
   app.replaceChildren();
 
   // ---------- 头部 ----------
@@ -41,6 +53,12 @@ export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, in
       h("div", { class: "mv-sub", text: "瞬间收纳 · 随取随用" })
     ),
     h("div", { class: "mv-head-actions" },
+      h("button", {
+        class: "btn ghost",
+        text: "☑ 批量",
+        title: "批量选择收藏（可多选后一次性删除）",
+        onclick: () => toggleBatchMode()
+      }),
       h("button", { class: "btn ghost", text: "＋ 新增", title: "手动新建一条收藏", onclick: () => cb.onAdd() }),
       h("button", { class: "btn ghost", text: "⚙ 设置", title: "收藏行为设置", onclick: () => openSettings(store) }),
       h("button", {
@@ -61,7 +79,99 @@ export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, in
 
   // ---------- 过滤条 ----------
   const filters = h("div", { class: "mv-filters" });
+  // 0.6.0：排序条独立成行——排序是「怎么看」，与「看哪些」（筛选）分开，标签再多也不会把它挤走
+  const sortBar = h("div", { class: "mv-sortbar" });
   const list = h("div", { class: "mv-list" });
+  // 批量操作条（仅批量模式显示）
+  const batchBar = h("div", { class: "batchbar" });
+
+  /** 排序偏好落库：只写排序三项，避免覆盖其它设置 */
+  function persistSort(): void {
+    store.saveSortPrefs({ sortMode, sortDir, sortGroup });
+  }
+
+  function rebuildSortBar(): void {
+    sortBar.replaceChildren();
+    const sel = h("select", {
+      class: "sort-select",
+      title: "排序方式（选定后会被记住，下次打开插件仍按此排序）"
+    }) as HTMLSelectElement;
+    const smartOpt = h("option", { value: "smart", text: "相关度（搜索时）" }) as HTMLOptionElement;
+    sel.append(smartOpt);
+    for (const o of SORT_OPTIONS) {
+      sel.append(h("option", { value: o.key, text: o.label, title: o.desc }) as HTMLOptionElement);
+    }
+    sel.value = sortMode;
+    sel.addEventListener("change", () => {
+      sortMode = normalizeSortKey(sel.value);
+      // 选具体排序键时套用它更自然的默认方向（标题/类型升序，时间类降序）
+      const preset = SORT_OPTIONS.find((o) => o.key === sortMode);
+      if (preset) sortDir = preset.dir;
+      persistSort();
+      renderList();
+    });
+
+    const dirBtn = h("button", {
+      class: "sort-dir-btn" + (sortDir === "asc" ? " active" : ""),
+      text: sortDir === "asc" ? "↑ 升序" : "↓ 降序",
+      title: "切换升序 / 降序",
+      onclick: () => {
+        sortDir = sortDir === "asc" ? "desc" : "asc";
+        persistSort();
+        renderList();
+      }
+    });
+
+    const groupBtn = h("button", {
+      class: "sort-dir-btn" + (sortGroup === "day" ? " active" : ""),
+      text: "按日期分组",
+      title: GROUP_OPTIONS[1].desc,
+      onclick: () => {
+        sortGroup = sortGroup === "day" ? "none" : "day";
+        persistSort();
+        renderList();
+      }
+    });
+
+    sortBar.append(h("span", { class: "sort-label", text: sortLabel(sortMode, sortDir) }), sel, dirBtn, groupBtn,
+      h("button", {
+        class: "sort-dir-btn",
+        text: "重置排序",
+        title: "回到默认：更新时间 ↓",
+        onclick: () => {
+          sortMode = "updated";
+          sortDir = "desc";
+          sortGroup = "none";
+          persistSort();
+          renderSortBarSafe();
+          renderList();
+        }
+      })
+    );
+    sortBar.append(h("span", { class: "mv-count", id: "mv-count" }));
+  }
+
+  /** 重建排序条并回填统计文案（避免每次刷新都重建整个下拉而丢焦点） */
+  function renderSortBarSafe(): void {
+    const count = sortBar.querySelector(".mv-count") as HTMLElement | null;
+    rebuildSortBar();
+    if (count && count.textContent) {
+      const el = sortBar.querySelector(".mv-count");
+      if (el) el.textContent = count.textContent;
+    }
+  }
+
+  /** 统计文案：共 N 条收藏 · 当前显示 M 条 */
+  function updateCount(shown: number): void {
+    const all = store.listSnippets();
+    const tagCount = store.listTags().length;
+    const el = sortBar.querySelector(".mv-count");
+    if (!el) return;
+    const parts = [`共 ${all.length} 条收藏`];
+    if (tagCount > 0) parts.push(`${tagCount} 个标签`);
+    if (shown !== all.length) parts.push(`当前显示 ${shown} 条`);
+    el.textContent = parts.join(" · ");
+  }
 
   function rebuildFilters(): void {
     filters.replaceChildren();
@@ -109,12 +219,87 @@ export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, in
         }));
       }
     }
-    const all = store.listSnippets();
-    filters.append(h("span", {
-      text: `共 ${all.length} 条收藏${store.listTags().length > 0 ? " · " + store.listTags().length + " 个标签" : ""}`,
-      style: { marginLeft: "auto", fontSize: "11.5px", color: "var(--text-3)", whiteSpace: "nowrap" }
-    }));
   }
+
+  // ---------- 批量选择（0.6.0） ----------
+  function toggleBatchMode(force?: boolean): void {
+    batchMode = force ?? !batchMode;
+    if (!batchMode) picked.clear();
+    renderBatchBar();
+    list.classList.toggle("batch", batchMode);
+    renderList();
+  }
+
+  function pickedSnippets(): Snippet[] {
+    return hits.filter((hh) => picked.has(hh.snippet._id)).map((hh) => hh.snippet);
+  }
+
+  function renderBatchBar(): void {
+    batchBar.replaceChildren();
+    batchBar.style.display = batchMode ? "flex" : "none";
+    if (!batchMode) return;
+    batchBar.append(
+      h("span", { class: "batchbar-label", text: `已选 ${picked.size} 条` }),
+      h("button", {
+        class: "mini-btn",
+        text: "全选当前结果",
+        onclick: () => { for (const hh of hits) picked.add(hh.snippet._id); renderBatchBar(); paintPicked(); }
+      }),
+      h("button", {
+        class: "mini-btn",
+        text: "反选",
+        onclick: () => {
+          for (const hh of hits) {
+            const id = hh.snippet._id;
+            if (picked.has(id)) picked.delete(id); else picked.add(id);
+          }
+          renderBatchBar(); paintPicked();
+        }
+      }),
+      h("span", { class: "batchbar-spacer" }),
+      h("button", {
+        class: "mini-btn danger",
+        text: "删除所选",
+        onclick: () => { void removePicked(); }
+      }),
+      h("button", { class: "mini-btn", text: "退出批量", onclick: () => toggleBatchMode(false) })
+    );
+  }
+
+  /** 只更新卡片选中态，不重绘列表（重绘会让复选框闪烁、并丢失滚动位置） */
+  function paintPicked(): void {
+    const cards = list.querySelectorAll(".card");
+    cards.forEach((el) => {
+      const id = (el as HTMLElement).dataset.id ?? "";
+      el.classList.toggle("batch-picked", picked.has(id));
+      const box = el.querySelector(".card-check input") as HTMLInputElement | null;
+      if (box) box.checked = picked.has(id);
+    });
+  }
+
+  async function removePicked(): Promise<void> {
+    const targets = pickedSnippets();
+    if (targets.length === 0) { toast("请先勾选要删除的收藏", "err"); return; }
+    const hasImage = targets.some((s) => s.kind === "image" && s.imagePath);
+    const ok = await confirmDialog(
+      "批量删除收藏",
+      `确定删除选中的 ${targets.length} 条收藏吗？删除后不可恢复。` +
+      (hasImage ? "（其中包含图片收藏，本地图片文件也会一并删除）" : "")
+    );
+    if (!ok) return;
+    for (const s of targets) {
+      if (s.imagePath) { try { window.flashStash?.deleteFile(s.imagePath); } catch { /* 忽略 */ } }
+    }
+    const n = store.removeSnippets(targets);
+    picked.clear();
+    toast(`已删除 ${n} 条收藏`);
+    // 删空后自动退出批量模式，避免停留在一个空壳工具栏上
+    if (store.listSnippets().length === 0) batchMode = false;
+    renderBatchBar();
+    list.classList.toggle("batch", batchMode);
+    refreshAll();
+  }
+
 
   function emptyState(): HTMLElement {
     return h("div", { class: "empty" },
@@ -134,11 +319,21 @@ export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, in
     try { window.utools?.hideMainWindow?.(true); } catch { /* 忽略 */ }
   }
 
+  /**
+   * 记录一次「取用」：使用次数 +1、最近使用时间刷新（排序「最近使用 / 使用次数」依赖这两个字段）。
+   * 复制成功才算取用，不成功不记账。为避免每次复制都重排列表（会让卡片在脚下跳动），
+   * 这里不立即重绘——下次刷新（搜索/切换排序/重进主面板）自然生效。
+   */
+  function noteUsage(s: Snippet): void {
+    try { store.touchSnippet(s); } catch { /* 忽略 */ }
+  }
+
   function doCopy(s: Snippet): void {
     const closeOnCopy = store.getUxSettings().closeOnCopy === true;
     if (s.kind === "image" && s.imagePath) {
       const r = window.flashStash?.copyImageByPath(s.imagePath);
       if (r && r.ok) {
+        noteUsage(s);
         if (closeOnCopy) { leaveAfterCopy(); return; }
         toast("图片已复制到剪贴板");
         return;
@@ -148,6 +343,7 @@ export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, in
     }
     const r = window.flashStash?.copyText(s.content ?? "");
     if (r && r.ok) {
+      noteUsage(s);
       if (closeOnCopy) { leaveAfterCopy(); return; }
       toast("已复制到剪贴板");
       return;
@@ -155,6 +351,7 @@ export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, in
     if (r) { toast(r.error ?? "复制失败", "err"); return; }
     // 非 uTools 环境兜底
     void navigator.clipboard?.writeText(s.content ?? "").then(() => {
+      noteUsage(s);
       if (closeOnCopy) leaveAfterCopy();
       else toast("已复制到剪贴板");
     });
@@ -195,6 +392,12 @@ export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, in
     ));
     const foot = h("div", { class: "modal-foot", style: { padding: "10px 0 0" } },
       h("button", {
+        class: "btn",
+        text: "编辑",
+        title: "快速进入编辑状态",
+        onclick: () => { close(); cb.onEdit(s); }
+      }),
+      h("button", {
         class: "btn primary",
         text: "复制内容",
         title: "复制完整内容到剪贴板",
@@ -213,14 +416,7 @@ export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, in
       body.push(h("div", { class: "card-excerpt", html: highlightText(snippetExcerpt(s), state.query) }));
     } else {
       // 图片卡片：小缩略图 + 文件名
-      const thumb = h("div", { class: "card-thumb" });
-      try {
-        if (s.imagePath && window.flashStash) {
-          const r = window.flashStash.readImageAsDataUrl(s.imagePath);
-          if (r && r.ok) thumb.append(h("img", { src: r.dataUrl as string, alt: "收藏图片" }));
-        }
-      } catch { /* 忽略 */ }
-      body.push(thumb);
+      body.push(thumbnailEl(s));
     }
     if (s.note) {
       body.push(h("div", { class: "card-note", html: highlightText(s.note, state.query) }));
@@ -245,6 +441,7 @@ export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, in
             if (!(await confirmDialog("删除收藏", "确定删除这条收藏吗？删除后不可恢复。"))) return;
             store.removeSnippet(s);
             if (s.imagePath) { try { window.flashStash?.deleteFile(s.imagePath); } catch { /* 忽略 */ } }
+            picked.delete(s._id);
             toast("已删除");
             refreshAll();
           })();
@@ -252,40 +449,96 @@ export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, in
       })
     );
     body.push(h("div", { class: "card-meta" },
-      h("span", { class: "card-time", text: formatTime(s.updatedAt) }),
+      h("span", { class: "card-time", text: usageText(s) }),
       actions
     ));
 
-    const cardEl = h("div", { class: "card" },
+    // 批量模式下的多选（CSS 控制：只有 .mv-list.batch 时才占位显示）
+    const checkBox = h("input", {
+      type: "checkbox",
+      checked: picked.has(s._id),
+      title: "选中这条收藏",
+      onchange: () => {
+        if (picked.has(s._id)) picked.delete(s._id); else picked.add(s._id);
+        renderBatchBar();
+        paintPicked();
+      }
+    }) as HTMLInputElement;
+    const checkWrap = h("div", { class: "card-check", onclick: (e: Event) => e.stopPropagation() }, checkBox);
+
+    const cardEl = h("div", { class: "card", dataset: { id: s._id } },
+      checkWrap,
       h("div", { class: `card-ico k-${s.kind}`, text: KIND_ICON[s.kind] }),
       h("div", { class: "card-body" }, ...body)
     );
-    cardEl.addEventListener("click", () => doCopy(s));
+    if (picked.has(s._id)) cardEl.classList.add("batch-picked");
+    cardEl.addEventListener("click", () => {
+      // 批量模式下点卡片 = 勾选/取消勾选，绝不误触发复制
+      if (batchMode) { checkBox.checked = !checkBox.checked; checkBox.dispatchEvent(new Event("change")); return; }
+      doCopy(s);
+    });
     cardEl.addEventListener("mouseenter", () => { if (activeIdx !== index) { activeIdx = index; paintActive(); } });
     return cardEl;
   }
 
+  /** 卡片时间行：显示更新时间；有取用记录时补上「使用 N 次」，让排序依据可见 */
+  function usageText(s: Snippet): string {
+    const base = formatTime(s.updatedAt);
+    const n = typeof s.useCount === "number" && s.useCount > 0 ? s.useCount : 0;
+    if (!n) return base;
+    const used = s.lastUsedAt ? ` · 最近使用 ${formatTime(s.lastUsedAt)}` : "";
+    return `${base} · 使用 ${n} 次${used}`;
+  }
+
   function renderList(): void {
+    const keepScroll = list.scrollTop;
     list.replaceChildren();
     const all = store.listSnippets();
+    updateCount(all.length);
     if (all.length === 0) {
       list.append(emptyState());
+      hits = [];
+      renderBatchBar();
       return;
     }
-    hits = filterSnippets(searchSnippets(all, store.listTags(), state.query), {
+    // 0.5.6：主面板搜索支持拼音匹配（设置中可关闭，默认开启）
+    const pinyinSearch = store.getUxSettings().pinyinSearch === true;
+    hits = filterSnippets(searchSnippets(all, store.listTags(), state.query, { pinyin: pinyinSearch }), {
       kind: state.kind,
       tags: state.tags
     });
+    // 0.6.0：排序发生在检索/筛选之后，因此「检索出的数据」同样按用户选定顺序排列
+    const scoreById = new Map(hits.map((hh) => [hh.snippet._id, hh.score]));
+    hits = sortSnippets(hits, {
+      key: sortMode,
+      dir: sortDir,
+      title: snippetTitle,
+      score: (s) => scoreById.get(s._id) ?? 0
+    }, state.query.trim().length > 0);
     if (hits.length === 0) {
       list.append(h("div", { class: "empty" },
         h("div", { class: "empty-ico", text: "🔍" }),
         h("div", { class: "empty-tip", text: state.query ? `没有找到匹配 “${state.query}” 的收藏` : "该分类下暂无收藏" })
       ));
+      updateCount(0);
+      renderBatchBar();
       return;
     }
-    hits.forEach((hit, i) => list.append(card(hit, i)));
+    updateCount(hits.length);
+    // 批量模式下已选条目若已不在当前结果里，保持选择（跨筛选批量删除）
+    let i = 0;
+    if (sortGroup === "day") {
+      for (const g of groupSnippets(hits, { key: sortMode, dir: sortDir }, state.query.trim().length > 0)) {
+        list.append(h("div", { class: "group-head", text: g.label }));
+        for (const hit of g.items) list.append(card(hit, i++));
+      }
+    } else {
+      for (const hit of hits) list.append(card(hit, i++));
+    }
     activeIdx = 0;
     paintActive();
+    renderBatchBar();
+    list.scrollTop = keepScroll;
   }
 
   function refreshAll(): void {
@@ -308,7 +561,23 @@ export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, in
       } else if (e.key === "Enter") {
         e.preventDefault();
         const hh = hits[activeIdx];
-        if (hh) doCopy(hh.snippet);
+        if (!hh) return;
+        // 批量模式下回车 = 勾选/取消高亮项，避免误复制（退出批量后才恢复“回车复制”）
+        if (batchMode) {
+          if (picked.has(hh.snippet._id)) picked.delete(hh.snippet._id); else picked.add(hh.snippet._id);
+          renderBatchBar();
+          paintPicked();
+          return;
+        }
+        doCopy(hh.snippet);
+      } else if (e.key === " " && batchMode) {
+        // 批量模式下空格也能勾选当前高亮项
+        e.preventDefault();
+        const hh = hits[activeIdx];
+        if (!hh) return;
+        if (picked.has(hh.snippet._id)) picked.delete(hh.snippet._id); else picked.add(hh.snippet._id);
+        renderBatchBar();
+        paintPicked();
       }
     }
   });
@@ -324,11 +593,17 @@ export function renderMain(app: HTMLElement, store: Store, cb: MainCallbacks, in
     searchInput
   );
 
-  app.append(h("div", { class: "mv" }, head, searchWrap, filters, list));
+  app.append(h("div", { class: "mv" }, head, searchWrap, filters, sortBar, batchBar, list));
+  renderBatchBar();
+  rebuildSortBar();
   refreshAll();
 
-  // 主面板 Escape：有搜索词 → 清空并回到全部；无搜索词 → 不消费，交还 uTools 正常退出
+  // 主面板 Escape：批量模式下先退出批量；有搜索词 → 清空并回到全部；无搜索词 → 不消费，交还 uTools 正常退出
   pushEsc(() => {
+    if (batchMode) {
+      toggleBatchMode(false);
+      return true;
+    }
     if (state.query) {
       state.query = "";
       searchInput.value = "";
@@ -363,7 +638,8 @@ function openTagManager(store: Store, refresh: () => void): void {
   const render = (): void => {
     body.replaceChildren();
     const all = store.listTags();
-    const tags = q ? all.filter((t: { name: string }) => t.name.toLowerCase().includes(q.toLowerCase())) : all;
+    // 0.5.6：标签管理查询支持拼音匹配（全拼/首字母）
+    const tags = q ? all.filter((t) => matchTextOrPinyin(t.name, q)) : all;
     if (selected.size > 0) {
       body.append(h("div", {
         style: { display: "flex", alignItems: "center", gap: "8px", padding: "6px 0", marginBottom: "4px", borderBottom: "1px solid var(--border)" }
@@ -494,13 +770,69 @@ function openSettings(store: Store): void {
     )
   );
 
+  // 0.5.6：Windows 系统消息提示开关（utools.showNotification）
+  const systemNotifyBox = h("input", { type: "checkbox", class: "setting-check", checked: ux.systemNotify !== false }) as HTMLInputElement;
+  const systemNotifyRow = h("div", {
+    style: { display: "flex", alignItems: "center", gap: "10px", padding: "8px 0 2px", borderTop: "1px solid var(--border)" }
+  }, systemNotifyBox,
+    h("span", { style: { fontSize: "13px", color: "var(--text)", lineHeight: "1.5" } },
+      h("strong", { text: "🪟 Windows 系统消息提示" }), " ",
+      h("span", { text: "保存成功后弹出系统通知「已收入闪藏 ✦」；关闭后仅保留插件内的提示（气泡 / 浮层）", style: { color: "var(--text-3)", fontSize: "12px" } })
+    )
+  );
+
+  // 0.5.6：搜索收藏时启用拼音匹配（全拼/首字母）
+  const pinyinSearchBox = h("input", { type: "checkbox", class: "setting-check", checked: ux.pinyinSearch !== false }) as HTMLInputElement;
+  const pinyinSearchRow = h("div", {
+    style: { display: "flex", alignItems: "center", gap: "10px", padding: "8px 0 2px", borderTop: "1px solid var(--border)" }
+  }, pinyinSearchBox,
+    h("span", { style: { fontSize: "13px", color: "var(--text)", lineHeight: "1.5" } },
+      h("strong", { text: "🔤 拼音搜索（默认开启）" }), " ",
+      h("span", { text: "搜索收藏时支持拼音全拼与首字母匹配——如输入 “qd” 或 “qianduan” 即可找到标签「前端」的收藏", style: { color: "var(--text-3)", fontSize: "12px" } })
+    )
+  );
+
+  // 0.6.0：默认排序偏好（一键把列表恢复成常用视图）
+  const sortModeSel = h("select", { class: "input", style: { width: "auto" } }) as HTMLSelectElement;
+  sortModeSel.append(h("option", { value: "updated", text: "更新时间（默认）" }) as HTMLOptionElement);
+  for (const o of SORT_OPTIONS) {
+    if (o.key === "updated") continue;
+    sortModeSel.append(h("option", { value: o.key, text: o.label, title: o.desc }) as HTMLOptionElement);
+  }
+  sortModeSel.value = ux.sortMode === "smart" ? "updated" : ux.sortMode;
+  const sortDirSel = h("select", { class: "input", style: { width: "auto" } }) as HTMLSelectElement;
+  sortDirSel.append(h("option", { value: "desc", text: "降序 ↓" }) as HTMLOptionElement);
+  sortDirSel.append(h("option", { value: "asc", text: "升序 ↑" }) as HTMLOptionElement);
+  sortDirSel.value = ux.sortDir;
+  const sortGroupBox = h("input", { type: "checkbox", class: "setting-check", checked: ux.sortGroup === "day" }) as HTMLInputElement;
+  const sortRow = h("div", {
+    style: { display: "flex", alignItems: "center", gap: "8px", padding: "8px 0 2px", borderTop: "1px solid var(--border)", flexWrap: "wrap" }
+  },
+    h("span", { style: { fontSize: "13px", color: "var(--text)", lineHeight: "1.5" } },
+      h("strong", { text: "↕ 默认排序" }), " ",
+      h("span", { text: "主面板「排序」下拉的默认值（选定即记住）", style: { color: "var(--text-3)", fontSize: "12px" } })
+    ),
+    sortModeSel, sortDirSel,
+    h("label", { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "var(--text-2)" } },
+      sortGroupBox, "按日期分组")
+  );
+
   const close = openModal("设置", h("div", {},
-    radioGroup, delayRow, closeOnCopyRow,
+    radioGroup, delayRow, closeOnCopyRow, systemNotifyRow, pinyinSearchRow, sortRow,
     h("div", { class: "modal-foot", style: { padding: "12px 0 0" } },
       h("button", {
         class: "btn",
         text: "恢复默认",
-        onclick: () => { store.saveUxSettings({ successStyle: "toast", successDelayMs: 1200, closeOnCopy: false }); toast("已恢复默认（轻量提示）"); close(); }
+        onclick: () => {
+          // 保留用户已选定的排序（那是一次显式的、独立的偏好），只复位“提示/搜索”类开关
+          const keep = store.getUxSettings();
+          store.saveUxSettings({
+            successStyle: "toast", successDelayMs: 1200, closeOnCopy: false, systemNotify: true, pinyinSearch: true,
+            sortMode: keep.sortMode, sortDir: keep.sortDir, sortGroup: keep.sortGroup
+          });
+          toast("已恢复默认（轻量提示）");
+          close();
+        }
       }),
       h("button", {
         class: "btn primary",
@@ -509,7 +841,12 @@ function openSettings(store: Store): void {
           store.saveUxSettings({
             successStyle: style,
             successDelayMs: parseInt(delaySel.value, 10) || 1200,
-            closeOnCopy: closeOnCopyBox.checked
+            closeOnCopy: closeOnCopyBox.checked,
+            systemNotify: systemNotifyBox.checked,
+            pinyinSearch: pinyinSearchBox.checked,
+            sortMode: normalizeSortKey(sortModeSel.value),
+            sortDir: normalizeSortDir(sortDirSel.value),
+            sortGroup: sortGroupBox.checked ? "day" : "none"
           });
           toast("设置已保存");
           close();

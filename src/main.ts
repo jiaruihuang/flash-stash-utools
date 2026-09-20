@@ -24,6 +24,25 @@ function applyTheme(): void {
 
 const store = window.utools?.db ? new Store(window.utools.db) : null;
 
+/**
+ * 取进入插件时带过来的文本（0.6.0）。
+ * uTools 的 `payload` 随场景不同可能是字符串、`{ text }`（带 type 的对象），
+ * 也可能是数组（多文件/多段）；此前只认字符串，遇到对象 payload 会「内容为空」，
+ * 这里统一兜底，避免用户看到「内容不能为空」却不知所措。
+ */
+function extractText(payload: unknown): string {
+  if (typeof payload === "string") return payload;
+  if (Array.isArray(payload)) return payload.map((x) => extractText(x)).filter(Boolean).join("\n");
+  if (payload && typeof payload === "object") {
+    const o = payload as Record<string, unknown>;
+    for (const k of ["text", "content", "value", "payload", "data"]) {
+      if (typeof o[k] === "string") return o[k] as string;
+    }
+    try { return JSON.stringify(payload); } catch { return ""; }
+  }
+  return "";
+}
+
 if (!store) {
   app.innerHTML =
     '<div style="padding:48px;text-align:center;color:var(--text-2);line-height:2">闪藏需要在 uTools 环境中运行' +
@@ -54,7 +73,7 @@ if (!store) {
           content: s.content,
           snippet: s
         }),
-      onAdd: () => showSave({ mode: "create", kind: "text", content: "", from: "main" })
+      onAdd: () => showSave({ mode: "create", kind: "text", content: "", from: "main", source: "text" })
     });
   }
 
@@ -65,33 +84,33 @@ if (!store) {
     app.replaceChildren();
     renderSave(app, st, init, {
       onOpenMain: showMain,
-      onNewAgain: () => showSave({ mode: "create", kind: "text", content: "", from: init.from })
+      onNewAgain: () => showSave({ mode: "create", kind: "text", content: "", from: init.from, source: "text" })
     });
   }
 
   window.utools?.onPluginEnter?.(({ code, payload }) => {
-    const p = typeof payload === "string" ? payload : "";
+    const p = extractText(payload);
     switch (code) {
       case "flashstash.main":
         showMain();
         return;
       case "flashstash.save.text":
-        showSave({ mode: "create", kind: "text", content: p, from: "utools" });
+        showSave({ mode: "create", kind: "text", content: p, from: "utools", source: "text" });
         return;
       case "flashstash.save.md":
-        showSave({ mode: "create", kind: "markdown", content: p, from: "utools" });
+        showSave({ mode: "create", kind: "markdown", content: p, from: "utools", source: "markdown" });
         return;
       case "flashstash.save.img":
-        showSave({ mode: "create", kind: "image", content: "", imageSource: p, from: "utools" });
+        showSave({ mode: "create", kind: "image", content: "", imageSource: p, from: "utools", source: "image" });
         return;
       case "flashstash.save.clipboard": {
         const sel = window.flashStash?.readClipboard?.();
         if (sel?.imageDataUrl) {
-          showSave({ mode: "create", kind: "image", content: "", imageSource: sel.imageDataUrl, from: "utools" });
+          showSave({ mode: "create", kind: "image", content: "", imageSource: sel.imageDataUrl, from: "utools", source: "image" });
         } else if (sel?.text) {
-          // 剪贴板保存默认 text，不自动判 markdown
-          // 用户需要 markdown 请用"闪藏：收藏 Markdown"命令
-          showSave({ mode: "create", kind: "text", content: sel.text, from: "utools" });
+          // 剪贴板保存默认 text，不自动判 markdown（见 docs/traps/main-panel.md §4）；
+          // 0.6.0 起保存视图会明确提示「正在按文本收藏」，用户想按 Markdown 收藏可一键切换类型
+          showSave({ mode: "create", kind: "text", content: sel.text, from: "utools", source: "text" });
         } else {
           toast("剪贴板中没有可保存的内容", "err");
           closeWindow();

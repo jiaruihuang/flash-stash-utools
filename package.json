@@ -1,7 +1,7 @@
 {
   "name": "flash-stash",
   "productName": "闪藏",
-  "version": "0.5.5",
+  "version": "0.6.8",
   "description": "uTools 插件：瞬间收纳 · 随取随用",
   "private": true,
   "type": "module",
@@ -32,6 +32,7 @@
     "dompurify": "^3.4.14",
     "lowlight": "^3.3.0",
     "marked": "^18.0.11",
+    "pinyin-pro": "^3.29.4",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
   },

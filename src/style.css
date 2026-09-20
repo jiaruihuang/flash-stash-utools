@@ -452,32 +452,120 @@ html[data-theme="dark"] .hljs-tag { color: #94a3b8; }
 
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field-label { font-size: 11px; color: var(--text-3); font-weight: 600; letter-spacing: .3px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; max-height: 72px; overflow-y: auto; }
-.chips::-webkit-scrollbar { width: 6px; }
-.chips::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+/* ============ 标签 token field（0.6.3）============
+   已选标签与输入框在**同一个带边框的容器**里：光标紧贴最后一个 token，
+   退格删标签就是"删光标前的东西"，所见即所删（不再隔空操作）。 */
+.tag-field { position: relative; }
+.tag-field-box {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  width: 100%; min-height: 36px; max-height: 96px; overflow-y: auto;
+  border: 1px solid var(--border); background: var(--bg-soft);
+  border-radius: var(--radius-sm); padding: 5px 8px; cursor: text;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.tag-field-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.tag-field-box::-webkit-scrollbar { width: 6px; }
+.tag-field-box::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+/* 输入框本体：无边框、随内容自适应宽度，光标就停在 token 之后 */
+.tag-input {
+  flex: 1 1 90px; min-width: 90px; border: none; outline: none; background: transparent;
+  color: var(--text); font-size: 13px; font-family: var(--font); padding: 3px 2px;
+}
+.tag-input::placeholder { color: var(--text-3); }
 .chip-item {
   display: inline-flex; align-items: center; gap: 6px; background: var(--accent-soft);
   color: var(--accent); border-radius: 999px; padding: 3px 6px 3px 11px; font-size: 12px;
-  animation: card-in .15s ease;
+  animation: card-in .15s ease; flex-shrink: 0; max-width: 100%;
 }
+.chip-item .chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip-item .x {
   width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  font-size: 11px; cursor: pointer; color: var(--accent); line-height: 1;
+  font-size: 11px; cursor: pointer; color: var(--accent); line-height: 1; flex-shrink: 0;
 }
 .chip-item .x:hover { background: rgba(99,102,241,.25); }
-.tag-suggest {
-  position: fixed; z-index: 9999; background: var(--card); border: 1px solid var(--border);
-  border-radius: 10px; box-shadow: var(--shadow-pop); max-height: 220px; overflow-y: auto;
-  min-width: 200px;
+/* 退格待删除的标签：第一次退格只把它标红（不删），再按一次才真删 */
+.chip-item.pending-del {
+  background: rgba(229, 72, 77, 0.16);
+  color: var(--danger);
+  box-shadow: 0 0 0 1px rgba(229, 72, 77, 0.5) inset;
 }
+.chip-item.pending-del .x { color: var(--danger); }
+.tag-suggest {
+  /* 0.6.0：改为**相对 .tag-field 内联展开**（top/left/width 由 JS 设成 0/100%），
+     彻底取代早期的 fixed + 上下翻转——那套逻辑在“上方空间更富余”时会把列表甩到
+     输入框上方老远（中间留下一大段空白），无论标签多少都很难看。
+     现在列表永远紧贴输入框：向下时贴下沿，向上时贴上沿（drop-up 用 translateY(-100%) 翻转）。 */
+  position: absolute; left: 0; top: 0; z-index: 9999;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: var(--shadow-pop); max-height: 220px; overflow-y: auto;
+  min-width: 200px; width: 100%;
+}
+.tag-suggest.drop-up { transform: translateY(-100%); }
 .tag-suggest::-webkit-scrollbar { width: 8px; }
 .tag-suggest::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
 .tag-suggest::-webkit-scrollbar-track { background: transparent; }
-.tag-suggest .opt { padding: 7px 12px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+/* 行高必须**显式固定**（0.6.6）：JS 侧按 32px 计算"一屏几行 / 滚到第几行"，
+   若这里由 font-size × line-height + padding 自然撑开，实际值会落在 26~33px 之间浮动，
+   `max-height` 就不再是真实行高的整数倍 → 列表底部/顶部永远被切掉半行。
+   用户实测的"遮蔽一半记录"就是这么来的。改这里必须同步改 save-view.ts 的 ROW_H。 */
+.tag-suggest .opt {
+  box-sizing: border-box; height: 32px; line-height: 18px; padding: 7px 12px;
+  font-size: 12.5px; color: var(--text-2); cursor: pointer;
+  display: flex; align-items: center;
+}
 .tag-suggest .opt:hover { background: var(--accent-soft); color: var(--accent); }
 .tag-suggest.kbd-nav .opt:hover { background: transparent; color: var(--text-2); }
 .tag-suggest .opt.active { background: var(--accent-soft); color: var(--accent); }
-.tag-input-wrap { position: relative; }
+
+/* ============ 主面板：排序条 + 批量选择（0.6.0） ============ */
+.mv-sortbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;
+  font-size: 11.5px; color: var(--text-3);
+}
+.mv-sortbar .mv-count { margin-left: auto; white-space: nowrap; }
+/* 排序下拉做成 chip 样式，与筛选条视觉统一 */
+.sort-select {
+  border: 1px solid var(--border); background: var(--card); color: var(--text-2);
+  border-radius: 999px; padding: 4px 8px; font-size: 12px; font-family: var(--font);
+  cursor: pointer; outline: none; max-width: 190px;
+}
+.sort-select:hover { border-color: var(--border-strong); color: var(--text); }
+.sort-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.sort-dir-btn {
+  border: 1px solid var(--border); background: var(--card); color: var(--text-2);
+  border-radius: 999px; padding: 3.5px 9px; font-size: 12px; cursor: pointer; font-family: var(--font);
+  transition: all .15s ease;
+}
+.sort-dir-btn:hover { border-color: var(--border-strong); color: var(--accent); }
+.sort-dir-btn.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+
+/* 批量选择 */
+.mini-btn.batch-on { background: var(--accent-soft); color: var(--accent); }
+.batchbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--accent-soft); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 10px; font-size: 12px; color: var(--text-2);
+}
+.batchbar .batchbar-label { color: var(--accent); font-weight: 600; }
+.batchbar .batchbar-spacer { flex: 1; }
+.batchbar .mini-btn { background: var(--card); border: 1px solid var(--border); }
+.batchbar .mini-btn:hover { background: var(--card); border-color: var(--accent); }
+
+/* 卡片上的多选复选框（批量模式下才出现 / 才占位） */
+.card-check { display: none; align-items: center; padding-right: 2px; }
+.card-check input {
+  width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--accent);
+}
+.mv-list.batch .card-check { display: flex; }
+.mv-list.batch .card:hover { transform: none; }
+.card.batch-picked { border-color: var(--accent); background: var(--accent-soft); }
+
+/* 分组标题（今天 / 昨天 / …；可选） */
+.group-head {
+  display: flex; align-items: center; gap: 8px; margin: 4px 0 0;
+  font-size: 11px; color: var(--text-3); letter-spacing: .4px;
+}
+.group-head::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 
 .sv-foot { display: flex; align-items: center; gap: 8px; }
 .sv-err { font-size: 12px; color: var(--danger); flex: 1; }

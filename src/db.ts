@@ -1,5 +1,6 @@
 import type { DbLike, DbDoc, Snippet, TagDoc, SnippetKind, UxSettings } from "./types.ts";
 import { uid } from "./utils.ts";
+import { normalizeSortKey, normalizeSortDir, normalizeGroup } from "./sort.ts";
 
 export function normalizeTags(tags: string[]): string[] {
   const seen = new Set<string>();
@@ -72,6 +73,47 @@ export class Store {
     if (!doc || !doc._id) return false;
     const res = this.db.remove(doc);
     return !!(res && res.ok);
+  }
+
+  /**
+   * 批量删除收藏（0.6.0）：由调用方统一确认一次，这里只负责逐条落库。
+   * 返回实际删除成功的条数（部分失败不影响其余条目）。
+   */
+  removeSnippets(docs: Snippet[]): number {
+    let n = 0;
+    for (const d of docs ?? []) {
+      if (d && this.removeSnippet(d)) n++;
+    }
+    return n;
+  }
+
+  /**
+   * 复制一条收藏（0.6.0）：生成独立副本（新 _id、创建/无取用记录），
+   * 图片条目复用同一图片文件（只读展示，不复制文件本身）。
+   */
+  copySnippet(s: Snippet): Snippet | null {
+    if (!s || !s._id) return null;
+    return this.createSnippet({
+      kind: s.kind,
+      content: s.content ?? "",
+      note: s.note ?? "",
+      tags: (s.tags ?? []).slice(),
+      imagePath: s.imagePath,
+      imageExt: s.imageExt
+    });
+  }
+
+  /** 记录一次「取用」（复制到剪贴板）：使用次数 +1、最近使用时间刷新 */
+  touchSnippet(s: Snippet): void {
+    if (!s || !s._id) return;
+    const now = Date.now();
+    const doc = this.getSnippet(s._id) ?? s;
+    doc.useCount = (typeof doc.useCount === "number" ? doc.useCount : 0) + 1;
+    doc.lastUsedAt = now;
+    this.db.put(doc);
+    // 同步调用方持有的对象，避免列表里显示的还是旧值
+    s.useCount = doc.useCount;
+    s.lastUsedAt = now;
   }
 
   private commit(doc: Snippet | TagDoc): void {
@@ -179,7 +221,12 @@ export class Store {
           ? "none"
           : "toast",
       successDelayMs: (doc as { successDelayMs?: number } | null)?.successDelayMs ?? 1200,
-      closeOnCopy: (doc as { closeOnCopy?: boolean } | null)?.closeOnCopy === true
+      closeOnCopy: (doc as { closeOnCopy?: boolean } | null)?.closeOnCopy === true,
+      systemNotify: (doc as { systemNotify?: boolean } | null)?.systemNotify !== false,
+      pinyinSearch: (doc as { pinyinSearch?: boolean } | null)?.pinyinSearch !== false,
+      sortMode: normalizeSortKey((doc as { sortMode?: unknown } | null)?.sortMode),
+      sortDir: normalizeSortDir((doc as { sortDir?: unknown } | null)?.sortDir),
+      sortGroup: normalizeGroup((doc as { sortGroup?: unknown } | null)?.sortGroup)
     };
   }
 
@@ -192,8 +239,29 @@ export class Store {
       successStyle: s.successStyle ?? "toast",
       successDelayMs: s.successDelayMs > 0 ? s.successDelayMs : 1200,
       closeOnCopy: s.closeOnCopy === true,
+      systemNotify: s.systemNotify !== false,
+      pinyinSearch: s.pinyinSearch !== false,
+      sortMode: normalizeSortKey(s.sortMode),
+      sortDir: normalizeSortDir(s.sortDir),
+      sortGroup: normalizeGroup(s.sortGroup),
       updatedAt: Date.now()
     } as DbDoc & UxSettings;
     this.db.put(doc);
+  }
+
+  /**
+   * 只更新排序偏好（0.6.0）：改排序是高频轻量操作，读改写整份设置，
+   * 避免调用方漏传其它字段而把它们重置。
+   */
+  saveSortPrefs(p: { sortMode?: UxSettings["sortMode"]; sortDir?: UxSettings["sortDir"]; sortGroup?: UxSettings["sortGroup"] }): UxSettings {
+    const cur = this.getUxSettings();
+    const next: UxSettings = {
+      ...cur,
+      sortMode: p.sortMode ?? cur.sortMode,
+      sortDir: p.sortDir ?? cur.sortDir,
+      sortGroup: p.sortGroup ?? cur.sortGroup
+    };
+    this.saveUxSettings(next);
+    return next;
   }
 }

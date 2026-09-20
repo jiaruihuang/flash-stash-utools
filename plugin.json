@@ -2,7 +2,7 @@
   "pluginName": "闪藏",
   "description": "瞬间收纳 · 随取随用 —— 快速收藏文本、图片与 Markdown 片段，标签化管理，一键复制",
   "author": "doubleXiao",
-  "version": "0.5.5",
+  "version": "0.6.8",
   "logo": "logo.png",
   "main": "dist/index.html",
   "preload": "preload.js",
@@ -21,12 +21,11 @@
     },
     {
       "code": "flashstash.save.text",
-      "explain": "将选中的文本保存到闪藏",
+      "explain": "将选中的文本按纯文本保存到闪藏（不做 Markdown 解析，支持多行）",
       "cmds": [
         {
           "type": "over",
           "label": "闪藏：收藏文本",
-          "exclude": "/\\n/",
           "minLength": 1,
           "maxLength": 20000
         }
@@ -34,7 +33,7 @@
     },
     {
       "code": "flashstash.save.md",
-      "explain": "将选中的多行/Markdown 片段保存到闪藏",
+      "explain": "将选中的内容按 Markdown 保存到闪藏（可富文本编辑）",
       "cmds": [
         {
           "type": "over",

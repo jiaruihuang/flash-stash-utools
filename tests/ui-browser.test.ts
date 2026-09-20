@@ -7,7 +7,8 @@ import { createRequire } from "node:module";
 import { chromium, type Browser, type Page } from "playwright";
 
 const require = createRequire(import.meta.url);
-const VITE_BIN = require.resolve("vite/bin/vite.js");
+// vite 8 起 package.json exports 不再暴露 ./bin/vite.js，从包根路径手工拼（原 require.resolve 已失效）
+const VITE_BIN = require.resolve("vite/package.json").replace(/package\.json$/, "bin/vite.js");
 const PORT = 4173;
 const BASE = "http://127.0.0.1:" + PORT;
 
@@ -159,4 +160,69 @@ await enter("flashstash.save.md", "over", "# 标题\n\n- 列表一\n- 列表二"
   await page.click(".editor-tab:has-text('预览')");
   await wait(150);
   assert.ok(await page.$(".preview h1"), "预览区应有标题");
+});
+test("真实浏览器 0.6.8：键盘 ↓ 越过可视区时列表不得被自身 scroll 事件重建（回归：回顶/丢高亮）", async () => {
+  assert.ok(page);
+  // 造 40 个标签（真实浏览器中滚动 = 真实异步 scroll 事件，无需任何注入）
+  await page.evaluate(() => {
+    const now = Date.now();
+    for (let i = 0; i < 40; i++) {
+      window.utools.db.put({ _id: "tag/scrollb-" + i, type: "tag", name: "滚测项" + String(i).padStart(2, "0"), createdAt: now, updatedAt: now });
+    }
+  });
+  await enter("flashstash.save.text", "over", "真实滚动回归");
+  await wait();
+  const input = page.locator(".tag-input");
+  await input.click();
+  await wait(120);
+  await input.press("Enter"); // 展开全量列表
+  await wait(150);
+
+  const read = () => page.evaluate(() => {
+    const s = document.querySelector(".tag-suggest") as HTMLElement;
+    const opts = [...s.querySelectorAll(".opt")] as HTMLElement[];
+    const rowH = opts.length > 1 ? opts[1].offsetTop - opts[0].offsetTop : 32;
+    return {
+      scrollTop: s.scrollTop,
+      active: opts.findIndex((o) => o.classList.contains("active")),
+      rowH,
+      clientH: s.clientHeight,
+      n: opts.length
+    };
+  });
+
+  const first = await read();
+  assert.ok(first.n >= 30, "候选应足够多以触发滚动：n=" + first.n);
+  const visibleRows = Math.floor(first.clientH / first.rowH);
+  let sawScroll = false;
+
+  // ↓ 一路打到最后一条（可量化：40 项、可视 ~10 行，必然触发滚动）。
+  // 注意：高亮从 -1 出发，第 1 次 ↓ = 第 0 项，故需按 n 次。
+  for (let i = 0; i < first.n; i++) {
+    await input.press("ArrowDown");
+    await wait(60); // scroll 事件在浏览器里异步派发，必须留事件循环的余量
+    const st = await read();
+    assert.ok(st.active >= 0,
+      `第 ${i + 1} 次 ↓ 后不得丢失高亮（active=${st.active}, scrollTop=${st.scrollTop}）`);
+    assert.equal(st.active, i,
+      `第 ${i + 1} 次 ↓ 后高亮必须连续推进（实际 active=${st.active}，scrollTop=${st.scrollTop}）`);
+    assert.ok(st.scrollTop <= st.active * st.rowH,
+      `高亮不能滚出可视区顶端（active=${st.active}, scrollTop=${st.scrollTop}）`);
+    assert.ok(st.active * st.rowH + st.rowH <= Math.ceil(st.scrollTop + (visibleRows + 1) * st.rowH),
+      `高亮必须紧随滚动可视区（active=${st.active}, scrollTop=${st.scrollTop}）`);
+    if (st.scrollTop > 0) sawScroll = true;
+  }
+  const last = await read();
+  assert.equal(last.active, last.n - 1, "↓ 到底应停在第 40 项（clamp，不循环）");
+  assert.ok(sawScroll, "按 ↓ 越过可视区后列表必须滚动跟随（否则本用例空转）");
+
+  // ↑ 一路回顶：途中高亮也不得丢失/被重建
+  for (let i = last.n - 2; i >= 0; i--) {
+    await input.press("ArrowUp");
+    await wait(60);
+    const st = await read();
+    assert.equal(st.active, i, `← ${last.n - 1 - i} 次 ↑ 后高亮应为第 ${i} 项（实际 ${st.active}）`);
+  }
+  const top = await read();
+  assert.equal(top.scrollTop, 0, "回到顶部时 scrollTop 应归零");
 });

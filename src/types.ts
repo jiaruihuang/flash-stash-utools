@@ -19,6 +19,10 @@ export interface Snippet {
   imageExt?: string;
   createdAt: number;
   updatedAt: number;
+  /** 复制取用次数（排序「使用次数」用；老数据缺省视为 0） */
+  useCount?: number;
+  /** 最近一次复制取用时间（排序「最近使用」用；0/缺省 = 从未取用） */
+  lastUsedAt?: number;
 }
 
 /** 标签文档 */
@@ -42,6 +46,19 @@ export interface UxSettings {
   successDelayMs: number;
   /** 复制后立即关闭窗口（所有复制操作成功即退出 uTools，不显示提示气泡） */
   closeOnCopy: boolean;
+  /** Windows 系统消息提示（utools.showNotification）：保存成功时是否弹系统通知，默认开启 */
+  systemNotify: boolean;
+  /** 搜索收藏记录时启用拼音匹配（全拼/首字母），默认开启 */
+  pinyinSearch: boolean;
+  /**
+   * 收藏列表排序方式（0.6.0）：选定后记住，下次打开插件仍用最后一次设定。
+   * "smart" = 搜索时按相关度、无关键词时按更新时间；其余为具体排序键。
+   */
+  sortMode: "smart" | "recent" | "updated" | "created" | "hits" | "title" | "kind";
+  /** 排序方向（asc 升序 / desc 降序） */
+  sortDir: "asc" | "desc";
+  /** 是否按「今天 / 昨天 / …」分组显示 */
+  sortGroup: "none" | "day";
 }
 
 export interface DbResult {

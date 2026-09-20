@@ -1,5 +1,6 @@
 import type { Snippet } from "./types.ts";
 import { snippetTitle } from "./utils.ts";
+import { matchPinyin } from "./pinyin.ts";
 
 export interface SearchHit {
   snippet: Snippet;
@@ -9,16 +10,25 @@ export interface SearchHit {
 
 const TOKEN_SPLIT = /[\s,，。;；:：、|]+/;
 
+/** 字段命中：常规子串，或（开启拼音时）拼音索引子串命中 */
+function fieldHit(field: string, tok: string, pinyinEnabled: boolean): boolean {
+  if (field.includes(tok)) return true;
+  return pinyinEnabled && matchPinyin(field, tok);
+}
+
 /**
  * 全文搜索：内容 / 备注 / 标题 / 标签。
  * 多词查询（空格分隔）要求每个词都至少命中一个字段（AND 语义）。
  * 权重：标签 > 备注 > 标题 > 内容。
+ * @param opts.pinyin 是否启用拼音匹配（全拼/首字母），默认开启
  */
 export function searchSnippets(
   snippets: Snippet[],
   tags: Array<{ _id: string; name: string }>,
-  queryRaw: string
+  queryRaw: string,
+  opts?: { pinyin?: boolean }
 ): SearchHit[] {
+  const pinyinEnabled = opts?.pinyin !== false;
   const q = (queryRaw ?? "").trim();
   if (!q) {
     return snippets.map((s) => ({ snippet: s, score: 0, matchedOn: [] }));
@@ -42,29 +52,29 @@ export function searchSnippets(
     let score = 0;
     for (const tok of effective) {
       let hitHere = false;
-      if (content.includes(tok)) {
+      if (fieldHit(content, tok, pinyinEnabled)) {
         score += 1;
         hitHere = true;
         matchedOn.add("content");
       }
-      if (note.includes(tok)) {
+      if (fieldHit(note, tok, pinyinEnabled)) {
         score += 4;
         hitHere = true;
         matchedOn.add("note");
       }
-      if (title.includes(tok)) {
+      if (fieldHit(title, tok, pinyinEnabled)) {
         score += 2;
         hitHere = true;
         matchedOn.add("title");
       }
-      if (tagNames.includes(tok)) {
+      if (fieldHit(tagNames, tok, pinyinEnabled)) {
         score += 6;
         hitHere = true;
         matchedOn.add("tag");
       }
       for (const t of s.tags ?? []) {
         const tn = (tagNameById.get(t) ?? t).toLowerCase();
-        if (tn.includes(tok)) {
+        if (fieldHit(tn, tok, pinyinEnabled)) {
           score += 5;
           hitHere = true;
           matchedOn.add("tag");
