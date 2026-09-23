@@ -11,6 +11,25 @@
   - 背景：现有全文搜索固定覆盖内容/标题/备注/标签（`src/search.ts` 的 `searchSnippets` + `fieldHit`），用户希望按范围筛选减少噪音。
   - 待确认（开工前向用户核实）：无内容标题字段？"适配范围"是否也包含 `标题`？`标签` 默认-only 与现行为差异较大（现在标签默认参与），需确认默认值真是"仅标签"。
   - 验收标准：多选即时生效于搜索结果；选择持久化到 `setting/ux`（沿用 0.6.0 排序偏好同款做法，下次启动保留）；全量 `npm test` 绿 + 用户真机验证。
+- **P1 「收藏 Markdown」路径粘贴表格不渲染成表格（只有「新增记录→切 Markdown→粘贴」才正常）**：
+  - 现象（用户 0.6.8 真机报告）：在 Markdown 文件里复制一张表格 → uTools 搜索框粘贴 → 选「闪藏：收藏 Markdown」→ 保存视图里表格**没有正常显示**；但走「主面板新增 → 类型选 Markdown → 再粘贴」时**显示正常**。
+  - 用户提供的复现内容（制表符分隔，非管道符表格，**从 Markdown 文件里复制出来即为此形态**——Markdown 源码表格被复制成富文本时，单元格间的 `|` 会变成纯文本制表符）：
+    ```
+    Model	Input	Output	Cached Read	Cached Write	Monthly limit
+    GLM-5.3-Flash	$0.15	$0.50	$0.03	-	$60
+    GLM-5.3	$1.40	$4.40	$0.26	-	$15
+    GLM-5.2	$1.40	$4.40	$0.26	-	$60
+    GLM-5.1	$1.40	$4.40	$0.26	-	$60
+    Kimi K3	$3.00	$15.00	$0.30	-	$15
+    Kimi K2.7 Code	$0.95	$4.00	$0.19	-	$60
+    ```
+  - 已查明的两条路径差异（开工时从这里入手，勿重新摸索）：
+    - 两处最终都走 `showSave({ mode:"create", kind:"markdown", source:"markdown" })`（`src/main.ts` 的 `flashstash.save.md` 分支 / 主面板 `onAdd` 后手动切类型）；**差异不在路由，在 `SaveInit.content` 的初始内容**——uTools 路径经 `extractText(payload)` 拿文本，主面板路径靠用户手工粘贴。
+    - `extractText`（`src/main.ts`）对对象 payload 只认 `text/content/value/payload/data` 字符串字段，**数组 payload 会 `join("\n")`**；若 uTools 对「over 选中的富文本/表格」给出的 payload 是**结构化对象或数组**（例如每个单元格/每一行一个元素，或 HTML/RTF 形态），取到的文本就会**丢失制表符或行列结构**，粘进编辑器自然成不了 GFM 表格 → 本待办的首要怀疑点。
+    - 次要怀疑点：Tiptap 的 table 扩展只在输入/粘贴为**管道符 GFM**时才会转成 table 节点；制表符分隔文本需经 `src/render.ts` 的 table 规则或 paste 规则转换——若编辑器侧的粘贴规则只认 `|`，两条路径的差异就会由「谁负责转」放大（需实测确认哪条路径做了转换）。
+  - 待确认（开工前向用户核实）：① 走 uTools 路径进入保存视图后，编辑器里**实际显示成什么**（一整段纯文本？每格一行？空？）；② 切到「源码」页看内容**是否与原文逐字符一致**（有无 `\t`）；③ 「类型」页签显示的标记是否为 Markdown；④ uTools 版本与「收藏 Markdown」是否由 **over 选中文本**触发（还是复制后由剪贴板进入）。
+  - 验收标准：从 Markdown 文件复制上表 → 两条路径进入保存视图，表格均正常渲染为表格且保存后的源码为合法 GFM；`npm test` 全绿 + 用户真机验证。
+  - 相关档案：`docs/traps/editor.md` §6（表格体系）/§8（`htmlToMarkdown` 自研 table 规则，**别再改回 gfm 自带规则**）、`docs/traps/main-panel.md` §4（剪贴板一律文本，勿推翻）。
 - **P2（后话）把 AGENTS + WORKMETHOD 的方法沉淀收敛为可复用的 Skill/模板包**：目标是在新项目上能"读取项目 → 初始化生成该项目实例（HANDOFF/docs/）"。本项目的四层机制就是试点；验收标准：脱离本项目上下文，仅凭模板即可初始化一个新项目并让新会话顺利接手。
 
 > 已知限制（不要当 bug 反复修）**不放本文件**：它们是长期知识，唯一出处是 docs/traps/ 各档案的「已知限制」节（改到对应模块前会读到）。
