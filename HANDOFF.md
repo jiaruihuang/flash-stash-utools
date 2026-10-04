@@ -24,7 +24,7 @@
 
 ## 2. 当前状态
 - 版本 **0.6.8**；`npm test` 133/133 绿（含构建）；发布物 `release/flash-stash-0.6.8/` + `flash-stash-0.6.8.zip`。
-- **未完成待办见 `@docs/TODO.md`**（唯一出处，此处不复制细节）。现有 3 条 P1 + 1 条 P2：搜索适配范围选择（标签/内容/备注）；「收藏 Markdown」路径粘贴表格不渲染；按检索结果中出现的标签做二次筛选（**交互方案未定，开工前须先与用户定方案**）。
+- **未完成待办见 `@docs/TODO.md`**（唯一出处，此处不复制细节）。现有 4 条 P1 + 1 条 P2：搜索/筛选状态保留优化；搜索适配范围选择；「收藏 Markdown」路径粘贴表格不渲染；按检索结果中出现的标签做二次筛选（交互方案未定）；SKILL/模板包。
 - 0.6.8 交付：下拉键盘滚动最终收敛（capture scroll 误重建 → 忽略自滚）——五层真因与排查全史见 traps/tag-suggest.md §6 与 docs/CHANGELOG-DETAIL.md 0.6.8。
 - 各版本功能变更**详见 docs/CHANGELOG.md**（按主题归集）；逐版明细见 docs/CHANGELOG-DETAIL.md。
 
